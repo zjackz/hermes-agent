@@ -1230,6 +1230,25 @@ def execute_code(
         _child_cwd = _resolve_child_cwd(_mode, tmpdir)
         _script_path = os.path.join(tmpdir, "script.py")
 
+        # ── Sandbox: apply resource limits via preexec_fn ──
+        _sandbox_preexec = None
+        if os.environ.get("HERMES_CODE_SANDBOX", "1") != "0":
+            def _sandbox_preexec():
+                """Set resource limits before exec (runs in child process)."""
+                import resource as _res
+                _mem = 1024 * 1024 * 1024  # 1GB
+                _fsize = 50 * 1024 * 1024  # 50MB
+                try:
+                    _res.setrlimit(_res.RLIMIT_AS, (_mem, _mem))
+                    _res.setrlimit(_res.RLIMIT_FSIZE, (_fsize, _fsize))
+                    _res.setrlimit(_res.RLIMIT_CORE, (0, 0))
+                except (ValueError, OSError):
+                    pass  # Some limits may not be settable
+                os.setsid()
+
+        if not _sandbox_preexec:
+            _sandbox_preexec = None if _IS_WINDOWS else os.setsid
+
         proc = subprocess.Popen(
             [_child_python, _script_path],
             cwd=_child_cwd,
@@ -1237,7 +1256,7 @@ def execute_code(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
-            preexec_fn=None if _IS_WINDOWS else os.setsid,
+            preexec_fn=_sandbox_preexec,
             creationflags=subprocess.CREATE_NO_WINDOW if _IS_WINDOWS else 0,
         )
 

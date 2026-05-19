@@ -141,6 +141,54 @@ search_files("function_name(", path="src/", file_glob="*.py")
 search_files("variable_name\\s*=", path="src/", file_glob="*.py")
 ```
 
+### 6. Operational Health Signals
+
+**WHEN the user asks "why is X failing" about a project/service, NOT just a code bug:**
+
+Before diving into code, check whether the project is even operational. See `references/project-health-diagnosis.md` for the full five-layer signal scan.
+
+```bash
+# (A) Is the service running?
+ps aux | grep -E "next|node|python|gunicorn|uvicorn" | grep -v grep
+
+# (B) Are there multiple instances or owners?
+#   Same service running as different users? That's likely a deployment issue.
+ps aux | grep "next-server"
+
+# (C) Are dependencies installed?
+#   node_modules/ missing? That's the root cause, not a code bug.
+ls node_modules/ 2>/dev/null || echo "MISSING: node_modules"
+ls -d .next/ dist/ build/ 2>/dev/null || echo "MISSING: build output"
+
+# (D) Is the project in a consistent state?
+git status --short
+git log --oneline -3
+
+# (E) Can it build/lint/test?
+npm run build -- --no-cache 2>&1 | tail -10
+npx tsc --noEmit 2>&1 | head -20
+
+# (F) Is it a business/positioning problem, not a technical one?
+#   Cross-reference session_search for historical context.
+#   "Failing" can mean "not getting sales / not meeting expectations" not "crash".
+```
+
+**IMPORTANT: When (F) fires (no technical issue, but user says "failing"):**
+- The failure is likely business/strategy/positioning, not code
+- Session_search for historical discussions about this project
+- Ask: "Is this a technical failure or a business/positioning failure?"
+- Don't suggest code fixes for business problems
+
+**Action:** Run the full signal scan BEFORE investigating individual files:
+
+```python
+terminal("ps aux | grep -iE 'next|node|python|gunicorn' | grep -v grep")
+terminal("ls node_modules/ 2>/dev/null && echo 'OK' || echo 'MISSING: node_modules'")
+terminal("git status --short")
+terminal("git log --oneline -3")
+session_search(f"why is {project_name} failing")
+```
+
 ### Phase 1 Completion Checklist
 
 - [ ] Error messages fully read and understood

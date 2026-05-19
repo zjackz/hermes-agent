@@ -267,6 +267,88 @@ curl -s "https://api.semanticscholar.org/graph/v1/author/search?query=Yann+LeCun
 - HTML (when available): `https://arxiv.org/html/{id}`
 - For local PDF processing, see the `ocr-and-documents` skill
 
+## Pitfalls & Production Use
+
+### arXiv API rate limiting is aggressive at certain times
+
+The arXiv API (`export.arxiv.org`) frequently returns **HTTP 429 Too Many Requests** and **read timeouts**, especially during these windows:
+- **00:00–02:00 UTC** (08:00–10:00 CST) — this is arXiv's daily submission cutoff window; API traffic spikes as new papers are indexed
+- This is exactly when our cron job (`ai-tracker-daily`, 08:00 CST) runs, so rate limiting is **expected, not exceptional**
+
+**When 429s happen, the API becomes unusable for 30–60 minutes** — even simple single queries with proper delays will fail. This is not a retry-logic problem; it's an API-side capacity issue. Plan accordingly.
+
+### Handling 429s in production scripts
+
+```python
+import urllib.request, time
+
+def arxiv_search(query, label, max_results=3, retries=2, timeout=15):
+    url = f"https://export.arxiv.org/api/query?..."
+    for attempt in range(retries):
+        req = urllib.request.Request(url, headers={"User-Agent": "arXivBot/1.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as f:
+                raw = f.read().decode("utf-8")
+        except Exception as e:
+            err_msg = str(e)
+            if attempt < retries - 1 and ("429" in err_msg or "timeout" in err_msg.lower()):
+                wait = 10 * (attempt + 1)
+                time.sleep(wait)
+                continue
+            return {"results": [], "error": err_msg}
+        # parse XML...
+    return {"results": [], "error": "Max retries exceeded"}
+```
+
+Key choices:
+- **`urllib.request` over `subprocess`+`curl`** — removes external command dependency; critical for cron environments where PATH may be minimal
+- **retries=2, timeout=15** — keeps worst-case per-query to ~45s; balanced against cron timeout limits
+- **Hard MAX_RUNTIME guard** — if the script runs under cron with a 120s limit, enforce a ~90s ceiling to leave time for output serialization
+
+### Weekend schedule
+
+arXiv does **not** publish new submissions on weekends (Saturday/Sunday UTC). Queries on those days will return papers from Thursday/Friday at best, or empty results if the time window has rotated. **Detect weekends upfront and skip arXiv queries entirely:**
+
+```python
+from datetime import datetime
+weekday = datetime.now(timezone.utc).weekday()
+IS_WEEKEND = weekday >= 5  # Saturday=5, Sunday=6
+if IS_WEEKEND:
+    print("Weekend — arXiv has no new papers. Skipping API calls.")
+```
+
+### Fallback strategy when API is down
+
+When the export API is saturated (429s across all categories), use HTML scraping as a fallback:
+
+```python
+# Scrape the "new submissions" listing pages directly
+# These are static HTML and bypass the API entirely
+import urllib.request, re, html as html_mod
+
+url = f"https://arxiv.org/list/cs.AI/new"
+req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+with urllib.request.urlopen(req, timeout=30) as f:
+    content = f.read().decode("utf-8")
+
+# Extract paper titles and IDs
+pattern = r'arXiv:(\d+\.\d+).*?<span class="descriptor">Title:</span>\s*(.*?)</div>'
+matches = re.findall(pattern, content, re.DOTALL)
+for aid, title in matches:
+    title = html_mod.unescape(re.sub(r'<[^>]+>', '', title)).strip()
+```
+
+**Caveat**: The HTML structure of `arxiv.org/list/` can change. The API is preferred when available; scraping is a fallback for when the API is saturated.
+
+### Summary of known issues
+
+| Issue | Symptom | Workaround |
+|-------|---------|------------|
+| 429 rate limit (peak hours) | All queries fail at 00:00–02:00 UTC | Skip or use HTML fallback |
+| Read timeout (API overloaded) | Individual queries hang >25s | Set timeout=15, retry once |
+| Weekend empty results | No papers returned on Sat/Sun | Skip arXiv entirely; use blogwatcher or HN |
+| `curl` not found in cron | Script fails silently | Use `urllib.request` not `subprocess` |
+
 ## ID Versioning
 
 - `arxiv.org/abs/1706.03762` always resolves to the **latest** version

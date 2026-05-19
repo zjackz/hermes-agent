@@ -140,17 +140,22 @@ Pick the closest existing category. Don't invent new top-level categories casual
 
 1. **Using `skill_manage(action='create')` for an in-repo skill.** It writes to `~/.hermes/skills/`, not the repo tree. Use `write_file` for in-repo creation.
 
-2. **Leading whitespace before `---`.** The validator checks `content.startswith("---")`; any leading blank line or BOM fails validation.
+2. **`patch` corrupts multi-line content with special characters.** When using `skill_manage(action='patch', new_string=...)` to replace a block in SKILL.md, if `new_string` contains backslash sequences (`\t`, `\\`, `\n`), quotes, or dollar signs — common in Makefile recipes and shell commands — the tool may write them as literal `\n` text instead of actual newlines. This produces a single corrupted line with `\\n` escape sequences embedded. To avoid this:
+   - For text without special characters: `patch` is fine.
+   - For multi-line content with backslashes, tabs, or nested quotes: use `skill_manage(action='edit', content=...)` with the COMPLETE rewritten SKILL.md, OR use `write_file` to write the file directly.
+   - Always verify: `skill_view(name)` after patching, check the patched area renders correctly.
 
-3. **Description too generic.** Peer descriptions start with "Use when ..." and describe the *trigger class*, not the one task. "Use when debugging X" > "Debug X".
+3. **Leading whitespace before `---`.** The validator checks `content.startswith("---")`; any leading blank line or BOM fails validation.
 
-4. **Forgetting the author/license/metadata block.** Not validator-enforced, but every peer has it; omitting makes the skill look half-finished.
+4. **Description too generic.** Peer descriptions start with "Use when ..." and describe the *trigger class*, not the one task. "Use when debugging X" > "Debug X".
 
-5. **Writing a skill that duplicates a peer.** Before creating, `ls skills/<category>/` and open 2-3 peers. Prefer extending an existing skill to creating a narrow sibling.
+5. **Forgetting the author/license/metadata block.** Not validator-enforced, but every peer has it; omitting makes the skill look half-finished.
 
-6. **Expecting the current session to see the new skill.** It won't. The skill loader is initialized at session start. Verify in a fresh session or via `skill_view` using the exact path.
+6. **Writing a skill that duplicates a peer.** Before creating, `ls skills/<category>/` and open 2-3 peers. Prefer extending an existing skill to creating a narrow sibling.
 
-7. **Linking to skills that don't exist in-repo.** `related_skills: [some-user-local-skill]` works for you but breaks for other clones. Prefer only in-repo links.
+7. **Expecting the current session to see the new skill.** It won't. The skill loader is initialized at session start. Verify in a fresh session or via `skill_view` using the exact path.
+
+8. **Linking to skills that don't exist in-repo.** `related_skills: [some-user-local-skill]` works for you but breaks for other clones. Prefer only in-repo links.
 
 ## Verification Checklist
 

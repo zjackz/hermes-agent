@@ -672,7 +672,8 @@ def _get_browser_engine() -> str:
             _cached_browser_engine = env_val
 
     # Validate: agent-browser only accepts "chrome" and "lightpanda".
-    _VALID_ENGINES = {"auto", "lightpanda", "chrome"}
+    # "playwright" bypasses agent-browser entirely (direct Playwright API).
+    _VALID_ENGINES = {"auto", "lightpanda", "chrome", "playwright"}
     if _cached_browser_engine not in _VALID_ENGINES:
         logger.warning(
             "Unknown browser engine %r (valid: %s), falling back to 'auto'",
@@ -1897,6 +1898,25 @@ def _run_browser_command(
     if timeout is None:
         timeout = _get_command_timeout()
     args = args or []
+
+    # ── Playwright direct mode ──
+    # When BROWSER_ENGINE=playwright or browser.engine=playwright in config,
+    # bypass the agent-browser CLI subprocess entirely and use Playwright API.
+    if _get_browser_engine() == "playwright":
+        import asyncio
+        from tools.browser_providers.playwright_persistent import playwright_execute
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # We're inside an async context — create a new thread to run it
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(1) as pool:
+                    future = pool.submit(asyncio.run, playwright_execute(task_id, command, args))
+                    return future.result(timeout=timeout)
+            else:
+                return loop.run_until_complete(playwright_execute(task_id, command, args))
+        except RuntimeError:
+            return asyncio.run(playwright_execute(task_id, command, args))
 
     # Build the command
     try:

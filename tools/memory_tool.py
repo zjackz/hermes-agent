@@ -309,6 +309,14 @@ class MemoryStore:
             self._set_entries(target, entries)
             self.save_to_disk(target)
 
+        # Sync to semantic memory (best-effort, non-blocking)
+        try:
+            from tools.memory_semantic import add_memory as _semantic_add, is_available as _sem_avail
+            if _sem_avail():
+                _semantic_add(content, metadata={"target": target})
+        except Exception:
+            pass  # Don't fail the primary operation
+
         return self._success_response(target, "Entry added.")
 
     def replace(self, target: str, old_text: str, new_content: str) -> Dict[str, Any]:
@@ -601,6 +609,19 @@ def memory_tool(
             return tool_error("old_text is required for 'remove' action.", success=False)
         result = store.remove(target, old_text)
 
+    elif action == "search":
+        # Semantic search across memories (uses Mem0 vector store)
+        if not content:
+            return tool_error("content (query) is required for 'search' action.", success=False)
+        try:
+            from tools.memory_semantic import search_memory, is_available as _sem_avail
+            if not _sem_avail():
+                return tool_error("Semantic memory not available (no embedding API key configured).", success=False)
+            results = search_memory(content, limit=5)
+            return json.dumps({"success": True, "results": results}, ensure_ascii=False)
+        except Exception as e:
+            return tool_error(f"Semantic search failed: {e}", success=False)
+
     else:
         return tool_error(f"Unknown action '{action}'. Use: add, replace, remove", success=False)
 
@@ -646,8 +667,8 @@ MEMORY_SCHEMA = {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["add", "replace", "remove"],
-                "description": "The action to perform."
+                "enum": ["add", "replace", "remove", "search"],
+                "description": "The action to perform. 'search' uses semantic similarity to find relevant memories."
             },
             "target": {
                 "type": "string",
