@@ -2424,11 +2424,18 @@ def run_conversation(
                     # still recover.  See _pool_may_recover_from_rate_limit
                     # for the single-credential-pool and CloudCode-quota
                     # exceptions.  Fixes #11314 and #13636.
-                    pool_may_recover = _ra()._pool_may_recover_from_rate_limit(
-                        agent._credential_pool,
-                        provider=agent.provider,
-                        base_url=getattr(agent, "base_url", None),
-                    )
+                    try:
+                        pool_may_recover = _ra()._pool_may_recover_from_rate_limit(
+                            agent._credential_pool,
+                            provider=agent.provider,
+                            base_url=getattr(agent, "base_url", None),
+                        )
+                    except (NameError, AttributeError):
+                        # Graceful fallback if _pool_may_recover_from_rate_limit
+                        # can't be resolved (stale .pyc, circular import, or
+                        # upstream refactoring).  Assume pool can't recover
+                        # so fallback logic kicks in.
+                        pool_may_recover = False
                     if not pool_may_recover:
                         agent._emit_status("⚠️ Rate limited — switching to fallback provider...")
                         if agent._try_activate_fallback(reason=classified.reason):

@@ -145,7 +145,7 @@ search_files("variable_name\\s*=", path="src/", file_glob="*.py")
 
 **WHEN the user asks "why is X failing" about a project/service, NOT just a code bug:**
 
-Before diving into code, check whether the project is even operational. See `references/project-health-diagnosis.md` for the full five-layer signal scan.
+Before diving into code, check whether the project is even operational. See `references/project-health-diagnosis.md` for the full five-layer signal scan. For WebSocket/SPA issues behind reverse proxies, see `references/websocket-behind-reverse-proxy.md`.
 
 ```bash
 # (A) Is the service running?
@@ -373,6 +373,11 @@ Use these Hermes tools during Phase 1:
 - **`read_file`** — Read source code with line numbers for precise analysis
 - **`terminal`** — Run tests, check git history, reproduce bugs
 - **`web_search`/`web_extract`** — Research error messages, library docs
+- **`browser_console`** — Check JS errors, evaluate expressions in browser context (e.g. `io.connected`, `performance.getEntriesByType('resource')` for WebSocket debugging)
+
+### Reference files
+
+- `references/websocket-behind-reverse-proxy.md` — Debugging WebSocket/SPA interactivity behind nginx auth_request
 
 ### With delegate_task
 

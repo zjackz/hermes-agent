@@ -501,6 +501,96 @@ for g in json.load(sys.stdin):
     print(f\"  {g['id']}  {g['description'] or '(no desc)':40}  {files}\")"
 ```
 
+## 11. Branch Management & Repo Cleanup
+
+Clean up a repo to keep only `main` — merge or discard all other branches.
+
+### Overview
+
+```bash
+# 1. See what's out there
+git branch -a                           # local + remote branches
+git remote prune origin                 # clean stale remote-tracking refs
+
+# 2. For each non-main branch, check if merged
+git log --oneline main..<branch>        # commits NOT in main
+git branch --merged main                # local branches already merged
+git branch -r --merged origin/main      # remote branches already merged
+```
+
+### Merge a Feature Branch into Main
+
+```bash
+# Fetch latest remote
+git fetch origin main
+
+# Merge (produces a merge commit if not fast-forwardable)
+git merge remotes/origin/feat/<name>
+
+# OR cherry-pick specific commits when you want selective inclusion
+git cherry-pick <sha1> <sha2>
+
+# Delete the branch after successful merge
+git push origin --delete feat/<name>    # remote
+git branch -d feat/<name>               # local
+```
+
+### Conflict Resolution During Merge
+
+1. **Find conflicts** — `grep -rn "^<<<<<<<\|^=======\|^>>>>>>>" .`
+2. **Resolve** — Use `skill_manage(action='patch')` to replace conflict blocks with the desired version
+3. **Stage** — `git add <resolved-files>`
+4. **Complete** — `GIT_EDITOR=true git merge --continue` (use env var to skip interactive editor)
+
+For batch conflict resolution (keeping HEAD side throughout), see `references/conflict-resolution.md`.
+
+### After Merging: Sync with Upstream
+
+Remote often diverges during the merge window — especially when working on a multi-agent repo:
+
+```bash
+# Fetch latest from origin
+git fetch origin main
+
+# Merge rather than rebase (cleaner for shared branches)
+# Accept the default merge commit message
+GIT_EDITOR=true git merge origin/main --no-edit
+
+# Push everything
+git push origin main
+```
+
+### Pitfalls
+
+- **Remote diverged during merge** — After merging a feature branch, `git push origin main` may be rejected because remote has new commits. Don't force-push. Do `git fetch origin main && git merge origin/main` to merge the divergence, then push.
+- **Stash before sync** — If you have unstaged changes (e.g. `output/.hermes-errors.log`), stash them before pulling/merging: `git stash push -m "auto-stash <date>" <file>`. Pop after push.
+- **Untracked files are safe** — New files (`specs/`, `tools/new_tool.py`) don't block pull/merge; only staged and unstaged tracked changes do.
+- **Branch may only exist remotely** — Use `remotes/origin/<name>` to reference it. If it's not in `git branch` output but shows in `git branch -a`, prefix with `remotes/origin/`.
+- **After deleting remote branch, remote-tracking ref lingers** — Run `git remote prune origin` to clean up stale refs, or fetch with `git fetch --prune`.
+
+### Complete Workflow: Merge All Feature Branches and Keep Only main
+
+```bash
+# 1. Fetch everything
+git fetch --all --prune
+
+# 2. List remote branches excluding main
+git branch -r | grep -v "/main$"
+
+# 3. For each, check what they contain
+git log --oneline main..origin/<name>
+
+# 4. Merge (see above) or skip (ask user)
+
+# 5. Delete remaining branches
+git push origin --delete feat/<name>   # repeat for each
+git remote prune origin                # clean remote-tracking refs
+
+# 6. Sync final state
+git pull --rebase origin main
+git push origin main
+```
+
 ## Quick Reference Table
 
 | Action | gh | git + curl |

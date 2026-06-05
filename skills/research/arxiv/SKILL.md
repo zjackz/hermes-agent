@@ -319,26 +319,77 @@ if IS_WEEKEND:
 
 ### Fallback strategy when API is down
 
-When the export API is saturated (429s across all categories), use HTML scraping as a fallback:
+When the export API is saturated (429s across all categories), use HTML scraping as a fallback. The listing pages at `arxiv.org/list/{cat}/new` contain multiple `<dl id='articles'>` sections (New submissions, Cross submissions, Replacements). Only the **first** section contains freshly submitted papers.
 
 ```python
-# Scrape the "new submissions" listing pages directly
-# These are static HTML and bypass the API entirely
 import urllib.request, re, html as html_mod
 
-url = f"https://arxiv.org/list/cs.AI/new"
-req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-with urllib.request.urlopen(req, timeout=30) as f:
-    content = f.read().decode("utf-8")
+def scrape_arxiv_new(category: str) -> list[dict]:
+    """
+    Scrape new arXiv submissions by parsing the static HTML listing page.
+    Returns list of {id, title, abstract} dicts.
+    Only extracts from the FIRST <dl> (New submissions), skipping cross-lists and replacements.
+    """
+    url = f"https://arxiv.org/list/{category}/new"
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=30) as f:
+        content = f.read().decode("utf-8")
 
-# Extract paper titles and IDs
-pattern = r'arXiv:(\d+\.\d+).*?<span class="descriptor">Title:</span>\s*(.*?)</div>'
-matches = re.findall(pattern, content, re.DOTALL)
-for aid, title in matches:
-    title = html_mod.unescape(re.sub(r'<[^>]+>', '', title)).strip()
+    # Locate the first (New submissions) section — skip cross-lists and replacements
+    dl_start = content.find("<dl id='articles'>")
+    if dl_start == -1:
+        return []
+    section = content[dl_start:]
+    dl_end = section.find('</dl>')
+    section = section[:dl_end]
+
+    papers = []
+    for entry in section.split('<dt>')[1:]:
+        # Extract arXiv ID from: <a href ="/abs/XXXX.XXXXX"
+        id_match = re.search(r'href\s*=\s*"/abs/(\d+\.\d+)"', entry)
+        if not id_match:
+            continue
+        pid = id_match.group(1)
+
+        # Find the <dd> block
+        dd_match = re.search(r'<dd>(.*?)</dd>', entry, re.DOTALL)
+        if not dd_match:
+            continue
+        dd = dd_match.group(1)
+
+        # Extract title
+        title_match = re.search(
+            r"<div class='list-title mathjax'>\s*"
+            r"<span class='descriptor'>Title:</span>\s*(.*?)\s*</div>",
+            dd, re.DOTALL
+        )
+        title = ''
+        if title_match:
+            title = html_mod.unescape(
+                re.sub(r'<[^>]+>', '', title_match.group(1))
+            ).strip()
+
+        # Extract abstract
+        abs_match = re.search(r"<p class='mathjax'>(.*?)</p>", dd, re.DOTALL)
+        abstract = ''
+        if abs_match:
+            abstract = html_mod.unescape(
+                re.sub(r'<[^>]+>', '', abs_match.group(1))
+            ).strip()
+
+        papers.append({'id': pid, 'title': title, 'abstract': abstract})
+
+    return papers
+
+# Usage
+cs_ai_papers = scrape_arxiv_new("cs.AI")
+cs_cl_papers = scrape_arxiv_new("cs.CL")
+print(f"cs.AI: {len(cs_ai_papers)} new submissions")
 ```
 
-**Caveat**: The HTML structure of `arxiv.org/list/` can change. The API is preferred when available; scraping is a fallback for when the API is saturated.
+**Caveat**: The HTML structure of `arxiv.org/list/` can change. Test after any arXiv site redesign. The API is preferred when available; scraping is a fallback for when the API is saturated.
+
+> **Reference**: `references/html-scraping-validation.md` contains the exact page structure verified on 2026-05-22, including the three `<dl>` sections (new/cross/replacements) and pitfalls encountered during scraping.
 
 ### Summary of known issues
 
